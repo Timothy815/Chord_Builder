@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chord Builder</title>
+<meta name="description" content="Build guitar voicings one chord tone at a time.">
+<style>
+:root{color-scheme:dark;--bg:#151616;--card:#202120;--line:#3c3e38;--ink:#f6f2e8;--muted:#c0bdb1;--gold:#f8c477;--green:#c9eb9b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 65% 0%,#30271f 0%,var(--bg) 55%);color:var(--ink);font:1rem/1.5 system-ui,sans-serif;min-height:100vh}
+main{max-width:1160px;margin:auto;padding:clamp(18px,4vw,52px)}
+header{margin-bottom:28px}
+h1{font-family:Georgia,serif;font-weight:500;font-size:clamp(2.8rem,8vw,5.2rem);line-height:1;margin:0 0 12px;letter-spacing:-.055em}
+h2{font-family:Georgia,serif;font-weight:500;font-size:1.65rem;margin:0}
+p{margin:0;color:var(--muted)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(14px,2.5vw,26px);margin-bottom:16px}
+.controls{display:grid;grid-template-columns:.75fr 1.1fr 1.3fr 1.15fr 1fr .9fr;gap:12px}
+label{display:grid;gap:5px;color:var(--muted);font-size:.9rem;min-width:0}
+select,input,button{font:inherit;color:var(--ink);border:1px solid #53554c;background:#292b27;border-radius:9px;min-height:44px}
+select,input{width:100%;padding:6px 10px}
+button{padding:7px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--gold)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid white;outline-offset:2px}
+button:disabled{opacity:.46;cursor:default}
+.custom{margin-top:12px;max-width:450px}
+[hidden]{display:none!important}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.tones,.actions,.notes{display:flex;gap:8px;flex-wrap:wrap}
+.tones{margin:13px 0 16px}
+.tone{display:inline-flex;gap:7px;align-items:center;border:1px solid var(--line);padding:5px 9px;border-radius:8px;min-height:38px}
+.tone b{color:var(--gold);font-size:.85em}
+.tone.current{border-color:var(--gold)}
+button.tone{min-height:44px}
+button.tone[aria-pressed="true"]{background:var(--gold);color:#221a12;border-color:var(--gold)}
+button.tone[aria-pressed="true"] b{color:inherit}
+.tone.done{border-color:#769750}
+.scroll{overflow-x:auto;padding:4px 3px 8px;scrollbar-color:#8b7457 #222}
+.board{min-width:690px;display:grid;grid-template-columns:34px repeat(13,minmax(0,1fr));align-items:stretch}
+.fret,.string{display:grid;place-items:center;font-size:.85rem;color:var(--muted)}
+.fret{padding-bottom:6px}
+.cell{height:44px;display:grid;place-items:center;position:relative;border-right:1px solid #aa87604f;background:#49352a}
+.cell.marked{background:#563e30}
+.cell.open{background:#282723;border-right:3px solid #c0a988}
+.cell::before{content:"";height:var(--gauge);background:#cdb19478;position:absolute;inset-inline:0;top:50%}
+.dot{position:absolute;width:5px;height:5px;border-radius:50%;background:#c9a77d99;bottom:-2px;z-index:1}
+.cell button{position:relative;z-index:2;padding:0 3px;min-height:34px;min-width:34px;border-radius:50%;border:1px solid #dca45f;background:#352b21;color:#ffda9e;font-weight:700;line-height:1}
+.cell button.selected{background:var(--green);border-color:var(--green);color:#1c2517}
+.cell button.bass{box-shadow:0 0 0 2px #273020,0 0 0 3px var(--green)}
+.barre-line{position:absolute;inset-block:0;left:50%;width:7px;transform:translateX(-50%);background:var(--green);z-index:1;pointer-events:none}
+.barre-line.low{bottom:50%}
+.barre-line.high{top:50%}
+.cell button.barre{outline:2px dashed var(--green);outline-offset:2px}
+.repeat-control{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.repeat-control input{width:20px;min-height:20px;margin:0;accent-color:var(--green)}
+.status{min-height:1.6em;margin-top:10px;color:var(--gold)}
+.notes{margin:10px 0}
+.note{border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+.note small{color:var(--muted)}
+.primary{background:var(--gold);color:#221a12;border-color:var(--gold);font-weight:700}
+#shape{font-family:ui-monospace,monospace}
+@media(max-width:980px){.controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:650px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Chord Builder</h1><p>Build a guitar voicing one chord tone at a time.</p></header>
+<section class="panel" aria-label="Chord settings">
+<div class="controls">
+<label>Root<select id="root"></select></label>
+<label>Formula<select id="formula"></select></label>
+<label>Bass / inversion<select id="bass"></select></label>
+<label>Note order<select id="order"><option value="formula">Formula order</option><option value="any">Any chord tone</option><option value="bass-up">Build from bass up</option></select></label>
+<label>Max fret span<select id="span"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option value="12">Unlimited</option></select></label>
+<label>Interval labels<select id="labels"><option value="degrees">Degrees</option><option value="semitones">Semitones</option></select></label>
+</div>
+<form id="custom" class="custom" hidden>
+<label>Custom formula<input id="degrees" value="1 3 5 7" placeholder="1  b3  5  6" aria-describedby="customHelp"></label>
+<p id="customHelp">Enter 2–6 degrees, starting with 1. Use b and # for alterations.</p>
+<button type="submit">Apply formula</button>
+<p id="error" role="alert"></p>
+</form>
+</section>
+<section class="panel" aria-labelledby="chord">
+<div class="row"><h2 id="chord"></h2><p>Standard tuning · Frets 0–12</p></div>
+<div id="tones" class="tones" aria-label="Chord tones"></div>
+<label class="repeat-control"><input type="checkbox" id="repeat" checked> Allow repeated tones</label>
+<div class="scroll" tabindex="0" aria-label="Scrollable guitar fretboard"><div id="board" class="board"></div></div>
+<p class="status" id="status" role="status"></p>
+</section>
+<section class="panel" aria-labelledby="voicing">
+<div class="row"><h2 id="voicing">Your voicing</h2><div class="actions">
+<button id="undo">Undo</button><button id="clear">Clear</button>
+<button id="pluck">Play notes</button><button id="strum" class="primary">Strum</button></div></div>
+<div id="notes" class="notes"></div>
+<p id="shape"></p><p id="audioStatus" role="status"></p>
+</section>
+</main>
+<script>
+'use strict';
+const presets = {
+  'Major':['','1 3 5'], 'Minor':['m','1 b3 5'], 'Major 7th':['maj7','1 3 5 7'],
+  'Dominant 7th':['7','1 3 5 b7'], 'Minor 7th':['m7','1 b3 5 b7'],
+  'Major 6th':['6','1 3 5 6'], 'Minor 6th':['m6','1 b3 5 6'],
+  'Diminished':['dim','1 b3 b5'], 'Diminished 7th':['dim7','1 b3 b5 bb7'],
+  'Half-diminished 7th':['m7♭5','1 b3 b5 b7'], 'Augmented':['aug','1 3 #5'],
+  'Sus2':['sus2','1 2 5'], 'Sus4':['sus4','1 4 5'], 'Add9':['add9','1 3 5 9'],
+  'Dominant 9th':['9','1 3 5 b7 9'], 'Major 9th':['maj9','1 3 5 7 9'],
+  'Minor 9th':['m9','1 b3 5 b7 9'], '7sus4':['7sus4','1 4 5 b7'], 'Power chord':['5','1 5']
+};
+const roots = ['C','C#','Db','D','D#','Eb','E','F','F#','Gb','G','G#','Ab','A','A#','Bb','B'];
+const letters = 'CDEFGAB';
+const natural = [0,2,4,5,7,9,11];
+const tuning = [40,45,50,55,59,64];
+const strings = ['E','A','D','G','B','e'];
+const inversions = ['Root position','First inversion','Second inversion','Third inversion','Fourth inversion','Fifth inversion'];
+const $ = id => document.getElementById(id);
+const mod = value => ((value % 12) + 12) % 12;
+const pretty = note => note.replaceAll('#','♯').replaceAll('b','♭');
+const spots = tuning.flatMap((open,string) => Array.from({length:13},(_,fret) => ({string,fret,midi:open+fret})));
+let notes = [];
+let target = null;
+let tones = [];
+let customFormula = '1 3 5 7';
+let audio;
+
+function offset(accidentals) {
+  return accidentals.startsWith('b') ? -accidentals.length : accidentals.length;
+}
+
+function parse(formula, root) {
+  const tokens = formula.trim().replaceAll('♭','b').replaceAll('♯','#').split(/[\s,–—-]+/);
+  if (tokens.length < 2 || tokens.length > 6 || tokens[0] !== '1') {
+    throw new Error('Start with 1 and enter 2–6 chord degrees.');
+  }
+  const rootLetter = letters.indexOf(root[0]);
+  const rootPitch = natural[rootLetter] + offset(root.slice(1));
+  const result = tokens.map(token => {
+    const match = /^(bb|##|b|#)?([1-9]|1[0-5])$/.exec(token);
+    if (!match) throw new Error('Invalid degree. Use 1–15 with optional flat or sharp signs.');
+    const [, accidentals = '', number] = match;
+    const degree = Number(number) - 1;
+    const step = natural[degree % 7] + 12*Math.floor(degree/7) + offset(accidentals);
+    const letter = (rootLetter + degree) % 7;
+    const pitch = mod(rootPitch + step);
+    const delta = mod(pitch - natural[letter] + 6) - 6;
+    return {degree:pretty(token),semitones:step,pitch,name:letters[letter]+(delta < 0 ? '♭'.repeat(-delta) : '♯'.repeat(delta))};
+  });
+  if (new Set(result.map(tone => tone.pitch)).size !== result.length) {
+    throw new Error('Use distinct chord tones. Degrees such as 2 and 9 share a pitch class.');
+  }
+  return result;
+}
+
+function option(value, text) {
+  return new Option(text, value);
+}
+
+function syncChord() {
+  const custom = $('formula').value === 'Custom';
+  $('custom').hidden = !custom;
+  tones = parse(custom ? customFormula : presets[$('formula').value][1], $('root').value);
+  $('bass').replaceChildren(...tones.map((tone,index) => option(index, tone.name+' · '+inversions[index])));
+  notes = [];
+  target = null;
+  render();
+}
+
+function pending() {
+  const bass = Number($('bass').value);
+  return [...tones.slice(bass),...tones.slice(0,bass)].filter(tone => !notes.some(note => note.tone === tone));
+}
+
+function eligible(spot, picked) {
+  if (!picked.length) return true;
+  if (spot.midi <= picked[0].midi || picked.some(note => note.string === spot.string)) return false;
+  const fretted = [...picked,spot].map(note => note.fret).filter(fret => fret > 0);
+  return fretted.length < 2 || Math.max(...fretted) - Math.min(...fretted) <= Number($('span').value);
+}
+
+function choices(tone, picked) {
+  return spots.filter(spot => mod(spot.midi) === tone.pitch && eligible(spot,picked));
+}
+
+function canFinish(picked, remaining) {
+  if (!remaining.length) return true;
+  const [tone,...others] = remaining;
+  return choices(tone,picked).some(spot => canFinish([...picked,spot],others));
+}
+
+function bassUpChoices(tone, picked) {
+  return choices(tone,picked).filter(spot =>
+    picked.every(note => spot.string > note.string && spot.midi >= note.midi)
+  );
+}
+
+function canFinishBassUp(picked, remaining) {
+  if (!remaining.length) return true;
+  return remaining.some(tone => bassUpChoices(tone,picked).some(spot =>
+    canFinishBassUp([...picked,spot],remaining.filter(other => other !== tone))
+  ));
+}
+
+function canBarreBetween(first, last, picked) {
+  const low = Math.min(first.string,last.string);
+  const high = Math.max(first.string,last.string);
+  return first.fret > 0 && first.fret === last.fret &&
+    !picked.some(note => note.string > low && note.string < high && note.fret < first.fret);
+}
+
+function barreRanges(picked) {
+  const sorted = [...picked].sort((a,b) => a.string-b.string);
+  const ranges = sorted.flatMap((first,index) => sorted.slice(index+1)
+    .filter(last => canBarreBetween(first,last,picked))
+    .map(last => ({fret:first.fret,low:first.string,high:last.string})));
+  ranges.sort((a,b) => (b.high-b.low) - (a.high-a.low) || a.fret-b.fret);
+  const suggested = [];
+  for (const range of ranges) {
+    if (suggested.every(other => range.high < other.low || range.low > other.high)) {
+      suggested.push(range);
+    }
+  }
+  return suggested;
+}
+
+function sharesBarre(spot, picked) {
+  return picked.some(note => canBarreBetween(spot,note,picked));
+}
+
+function interval(tone) {
+  return $('labels').value === 'semitones' ? tone.semitones : tone.degree;
+}
+
+function addSpot(spot, tone) {
+  notes.push({...spot,tone});
+  target = null;
+  render(true);
+}
+
+function render(restoreFocus = false) {
+  const remaining = pending();
+  const mode = $('order').value;
+  const bassUp = mode === 'bass-up';
+  const repeats = $('repeat').checked;
+  const next = mode !== 'formula' && notes.length ? remaining : remaining.slice(0,1);
+  const addingRepeats = repeats && notes.length && (bassUp || !remaining.length);
+  const canTarget = mode === 'any' && notes.length > 0;
+  const bass = Number($('bass').value);
+  const preset = presets[$('formula').value];
+  const symbol = pretty($('root').value)+(preset ? preset[0] : ' custom');
+  $('chord').textContent = symbol+(bass ? '/'+tones[bass].name : '');
+  $('tones').replaceChildren(...tones.map(tone => {
+    const selectable = canTarget && (remaining.includes(tone) || addingRepeats);
+    const chip = document.createElement(selectable ? 'button' : 'span');
+    if (selectable) {
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed',String(target === tone));
+      chip.onclick = () => {
+        target = target === tone ? null : tone;
+        render();
+        $('tones').children[tones.indexOf(tone)].focus();
+      };
+    }
+    const degree = document.createElement('b');
+    degree.textContent = interval(tone);
+    chip.className = 'tone';
+    if (target ? target === tone : next.includes(tone)) chip.classList.add('current');
+    if (!remaining.includes(tone)) chip.classList.add('done');
+    chip.append(degree,tone.name);
+    return chip;
+  }));
+  const available = new Map();
+  const candidateTones = canTarget && target ? [target] : addingRepeats ? tones : next;
+  const findChoices = bassUp ? bassUpChoices : choices;
+  const canComplete = bassUp ? canFinishBassUp : canFinish;
+  for (const tone of candidateTones) {
+    for (const spot of findChoices(tone,notes)) {
+      if (!notes.length || canComplete([...notes,spot],remaining.filter(other => other !== tone))) {
+        available.set(spot,tone);
+      }
+    }
+  }
+  const hasBarreOption = addingRepeats && [...available].some(([spot,tone]) =>
+    !remaining.includes(tone) && sharesBarre(spot,notes)
+  );
+  const barres = remaining.length ? [] : barreRanges(notes);
+  const board = document.createDocumentFragment();
+  board.append(document.createElement('span'));
+  for (let fret=0; fret<=12; fret++) {
+    const heading = document.createElement('span');
+    heading.className = 'fret';
+    heading.textContent = fret;
+    board.append(heading);
+  }
+  for (let string=5; string>=0; string--) {
+    const label = document.createElement('span');
+    label.className = 'string';
+    label.textContent = strings[string];
+    board.append(label);
+    for (const spot of spots.slice(string*13,(string+1)*13)) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.style.setProperty('--gauge',(2.2-string*.24)+'px');
+      if (spot.fret === 0) cell.classList.add('open');
+      if ([3,5,7,9,12].includes(spot.fret)) cell.classList.add('marked');
+      if ((string === 2 && [3,5,7,9,12].includes(spot.fret)) || (string === 4 && spot.fret === 12)) {
+        const dot = document.createElement('i');
+        dot.className = 'dot';
+        cell.append(dot);
+      }
+      const barre = barres.find(range => range.fret === spot.fret &&
+        string >= range.low && string <= range.high);
+      if (barre) {
+        const line = document.createElement('span');
+        line.className = 'barre-line';
+        line.setAttribute('aria-hidden','true');
+        if (string === barre.low) line.classList.add('low');
+        if (string === barre.high) line.classList.add('high');
+        cell.append(line);
+      }
+      const picked = notes.find(note => note.string === string && note.fret === spot.fret);
+      const tone = picked?.tone ?? available.get(spot);
+      if (tone) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = tone.name;
+        button.className = picked ? 'selected' : 'candidate';
+        if (picked && picked === notes[0]) button.classList.add('bass');
+        button.setAttribute('aria-label',tone.name+($('labels').value === 'semitones' ? ', semitones from root ' : ', degree ')+interval(tone)+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret+(picked ? ', selected' : ''));
+        if (!picked && addingRepeats && !remaining.includes(tone) && sharesBarre(spot,notes)) {
+          button.classList.add('barre');
+          button.setAttribute('aria-label',button.getAttribute('aria-label')+', possible barre');
+        }
+        button.title = button.getAttribute('aria-label');
+        button.disabled = Boolean(picked);
+        if (!picked) button.onclick = () => addSpot(spot,tone);
+        cell.append(button);
+      }
+      board.append(cell);
+    }
+  }
+  $('board').replaceChildren(board);
+  const first = remaining[0];
+  let message = 'Voicing complete. Listen to it or undo your last note.';
+  if (!notes.length) message = 'Pick a bass note · '+first.name+' ('+first.degree+').';
+  else if (first && !available.size) message = 'No completion from these notes with the current settings. Undo or adjust the settings.';
+  else if (first) message = 'Add '+(target ? [target] : next).map(tone => tone.name+' ('+interval(tone)+')').join(' or ')+'.';
+  if (bassUp && first && notes.length && available.size) {
+    message = 'Choose a higher string. Still needed: '+remaining.map(tone => tone.name+' ('+interval(tone)+')').join(', ')+'.';
+  }
+  if (!first && addingRepeats && available.size) message = 'Voicing complete. Add repeated tones on unused strings.';
+  if (canTarget && available.size) {
+    message += target ? ' Select '+target.name+' again to show all choices.' :
+      ' Select a chord tone above to focus on it.';
+  }
+  if (canTarget && target && !available.size) message = 'No available positions for '+target.name+'. Select another chord tone or clear the filter.';
+  if (hasBarreOption) message += ' Dashed outlines show notes that could share a barre.';
+  if (barres.length) message += ' Solid lines show possible barres at '+barres.map(range =>
+    'fret '+range.fret+', strings '+(6-range.low)+'–'+(6-range.high)
+  ).join('; ')+'.';
+  $('status').textContent = message;
+  const sorted = [...notes].sort((a,b) => a.midi-b.midi);
+  $('notes').replaceChildren(...sorted.map(note => {
+    const chip = document.createElement('span');
+    const small = document.createElement('small');
+    chip.className = 'note';
+    small.textContent = ' · '+interval(note.tone);
+    chip.append(note.tone.name+(Math.floor(note.midi/12)-1),small);
+    return chip;
+  }));
+  $('shape').textContent = notes.length ? 'Low E to high e   '+strings.map((_,index) => notes.find(note => note.string === index)?.fret ?? '×').join(' / ') : 'Selected notes will appear here from low to high.';
+  for (const id of ['undo','clear','pluck','strum']) $(id).disabled = !notes.length;
+  if (restoreFocus) ($('board').querySelector('.candidate') ?? $('strum')).focus();
+}
+
+async function play(strum) {
+  $('audioStatus').textContent = '';
+  const order = [...notes].sort((a,b) => strum ? a.string-b.string : a.midi-b.midi);
+  try {
+    audio ??= new (window.AudioContext || window.webkitAudioContext)();
+    await audio.resume();
+    const start = audio.currentTime + .035;
+    for (const [index,note] of order.entries()) {
+      const time = start + index*(strum ? .026 : .25);
+      const frequency = 440 * 2**((note.midi-69)/12);
+      for (let harmonic=1; harmonic<=6; harmonic++) {
+        const wave = audio.createOscillator();
+        const envelope = audio.createGain();
+        wave.frequency.value = frequency*harmonic;
+        envelope.gain.setValueAtTime(.0001,time);
+        envelope.gain.exponentialRampToValueAtTime(.15/harmonic**1.65,time+.008);
+        envelope.gain.exponentialRampToValueAtTime(.0001,time+1.6/harmonic**.4);
+        wave.connect(envelope).connect(audio.destination);
+        wave.start(time);
+        wave.stop(time+1.65);
+      }
+    }
+  } catch {
+    $('audioStatus').textContent = 'Playback is unavailable in this browser.';
+  }
+}
+
+$('root').replaceChildren(...roots.map(root => option(root,pretty(root))));
+$('formula').replaceChildren(...[...Object.keys(presets),'Custom'].map(formula => option(formula,formula)));
+$('formula').value = 'Major 7th';
+$('root').onchange = $('formula').onchange = syncChord;
+$('bass').onchange = () => { notes = []; target = null; render(); };
+$('order').onchange = () => { target = null; render(); };
+$('repeat').onchange = () => { target = null; render(); };
+$('labels').onchange = () => render();
+$('span').onchange = () => {
+  target = null;
+  while (notes.length > 1 && !eligible(notes.at(-1),notes.slice(0,-1))) notes.pop();
+  render();
+};
+$('undo').onclick = () => { notes.pop(); target = null; render(true); };
+$('clear').onclick = () => { notes = []; target = null; render(true); };
+$('pluck').onclick = () => play(false);
+$('strum').onclick = () => play(true);
+$('custom').onsubmit = event => {
+  event.preventDefault();
+  try {
+    parse($('degrees').value,$('root').value);
+    customFormula = $('degrees').value;
+    $('error').textContent = '';
+    syncChord();
+  } catch (error) {
+    $('error').textContent = error.message;
+  }
+};
+syncChord();
+</script>
+</body>
+</html>
