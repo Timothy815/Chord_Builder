@@ -3,6 +3,9 @@
 Open index.html in a browser to use Chord Builder locally. Its styles,
 fretboard logic, and synthesized audio are bundled in the HTML file.
 
+Use **Show all fretboard notes** to toggle the note-name overlay.
+Chord choices remain highlighted in either view.
+
 ## Publish on GitHub Pages
 
 1. Extract this ZIP. Upload index.html to the top level of your GitHub

@@ -51,7 +51,10 @@ button.tone[aria-pressed="true"] b{color:inherit}
 .barre-line.low{bottom:50%}
 .barre-line.high{top:50%}
 .cell button.barre{outline:2px dashed var(--green);outline-offset:2px}
-.repeat-control{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.board-tools{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.background-note{position:relative;z-index:2;background:#2f261f;color:#e2d8cd;border-radius:5px;padding:0 4px;font-size:.8rem}
+#allNotes[aria-pressed="true"]{border-color:var(--gold);color:var(--gold)}
+.repeat-control{display:flex;align-items:center;gap:8px;margin:0}
 .repeat-control input{width:20px;min-height:20px;margin:0;accent-color:var(--green)}
 .status{min-height:1.6em;margin-top:10px;color:var(--gold)}
 .notes{margin:10px 0}
@@ -85,7 +88,10 @@ button.tone[aria-pressed="true"] b{color:inherit}
 <section class="panel" aria-labelledby="chord">
 <div class="row"><h2 id="chord"></h2><p>Standard tuning · Frets 0–12</p></div>
 <div id="tones" class="tones" aria-label="Chord tones"></div>
+<div class="board-tools">
 <label class="repeat-control"><input type="checkbox" id="repeat" checked> Allow repeated tones</label>
+<button type="button" id="allNotes" aria-pressed="false" aria-controls="board">Show all fretboard notes</button>
+</div>
 <div class="scroll" tabindex="0" aria-label="Scrollable guitar fretboard"><div id="board" class="board"></div></div>
 <p class="status" id="status" role="status"></p>
 </section>
@@ -114,6 +120,8 @@ const letters = 'CDEFGAB';
 const natural = [0,2,4,5,7,9,11];
 const tuning = [40,45,50,55,59,64];
 const strings = ['E','A','D','G','B','e'];
+const sharpNames = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+const flatNames = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const inversions = ['Root position','First inversion','Second inversion','Third inversion','Fourth inversion','Fifth inversion'];
 const $ = id => document.getElementById(id);
 const mod = value => ((value % 12) + 12) % 12;
@@ -121,6 +129,7 @@ const pretty = note => note.replaceAll('#','♯').replaceAll('b','♭');
 const spots = tuning.flatMap((open,string) => Array.from({length:13},(_,fret) => ({string,fret,midi:open+fret})));
 let notes = [];
 let target = null;
+let showAllNotes = false;
 let tones = [];
 let customFormula = '1 3 5 7';
 let audio;
@@ -285,6 +294,8 @@ function render(restoreFocus = false) {
     !remaining.includes(tone) && sharesBarre(spot,notes)
   );
   const barres = remaining.length ? [] : barreRanges(notes);
+  const noteNames = ($('root').value.endsWith('b') || $('root').value === 'F' ? flatNames : sharpNames).slice();
+  for (const tone of tones) noteNames[tone.pitch] = tone.name;
   const board = document.createDocumentFragment();
   board.append(document.createElement('span'));
   for (let fret=0; fret<=12; fret++) {
@@ -336,6 +347,12 @@ function render(restoreFocus = false) {
         button.disabled = Boolean(picked);
         if (!picked) button.onclick = () => addSpot(spot,tone);
         cell.append(button);
+      } else if (showAllNotes) {
+        const label = document.createElement('span');
+        label.className = 'background-note';
+        label.textContent = noteNames[mod(spot.midi)];
+        label.title = label.textContent+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret;
+        cell.append(label);
       }
       board.append(cell);
     }
@@ -409,6 +426,11 @@ $('bass').onchange = () => { notes = []; target = null; render(); };
 $('order').onchange = () => { target = null; render(); };
 $('repeat').onchange = () => { target = null; render(); };
 $('labels').onchange = () => render();
+$('allNotes').onclick = () => {
+  showAllNotes = !showAllNotes;
+  $('allNotes').setAttribute('aria-pressed',String(showAllNotes));
+  render();
+};
 $('span').onchange = () => {
   target = null;
   while (notes.length > 1 && !eligible(notes.at(-1),notes.slice(0,-1))) notes.pop();
