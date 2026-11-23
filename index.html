@@ -15,6 +15,7 @@ h1{font-family:Georgia,serif;font-weight:500;font-size:clamp(2.8rem,8vw,5.2rem);
 h2{font-family:Georgia,serif;font-weight:500;font-size:1.65rem;margin:0}
 p{margin:0;color:var(--muted)}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(14px,2.5vw,26px);margin-bottom:16px}
+.mode-control{max-width:240px;margin-bottom:12px}
 .controls{display:grid;grid-template-columns:.75fr 1.1fr 1.3fr 1.15fr 1fr .9fr;gap:12px}
 label{display:grid;gap:5px;color:var(--muted);font-size:.9rem;min-width:0}
 select,input,button{font:inherit;color:var(--ink);border:1px solid #53554c;background:#292b27;border-radius:9px;min-height:44px}
@@ -45,6 +46,8 @@ button.tone[aria-pressed="true"] b{color:inherit}
 .cell::before{content:"";height:var(--gauge);background:#cdb19478;position:absolute;inset-inline:0;top:50%}
 .dot{position:absolute;width:5px;height:5px;border-radius:50%;background:#c9a77d99;bottom:-2px;z-index:1}
 .cell button{position:relative;z-index:2;padding:0 3px;min-height:34px;min-width:34px;border-radius:50%;border:1px solid #dca45f;background:#352b21;color:#ffda9e;font-weight:700;line-height:1}
+.cell button.free:not(.selected){background:#302720;color:#e2d8cd;border-color:transparent}
+.cell button.free:hover{border-color:var(--gold)}
 .cell button.selected{background:var(--green);border-color:var(--green);color:#1c2517}
 .cell button.bass{box-shadow:0 0 0 2px #273020,0 0 0 3px var(--green)}
 .barre-line{position:absolute;inset-block:0;left:50%;width:7px;transform:translateX(-50%);background:var(--green);z-index:1;pointer-events:none}
@@ -70,7 +73,8 @@ button.tone[aria-pressed="true"] b{color:inherit}
 <main>
 <header><h1>Chord Builder</h1><p>Build a guitar voicing one chord tone at a time.</p></header>
 <section class="panel" aria-label="Chord settings">
-<div class="controls">
+<label class="mode-control">Mode<select id="builderMode"><option value="guided">Guided builder</option><option value="explore">Open explore</option></select></label>
+<div class="controls" id="guidedControls">
 <label>Root<select id="root"></select></label>
 <label>Formula<select id="formula"></select></label>
 <label>Bass / inversion<select id="bass"></select></label>
@@ -89,10 +93,10 @@ button.tone[aria-pressed="true"] b{color:inherit}
 <div class="row"><h2 id="chord"></h2><p>Standard tuning · Frets 0–12</p></div>
 <div id="tones" class="tones" aria-label="Chord tones"></div>
 <div class="board-tools">
-<label class="repeat-control"><input type="checkbox" id="repeat" checked> Allow repeated tones</label>
+<label class="repeat-control" id="repeatControl"><input type="checkbox" id="repeat" checked> Allow repeated tones</label>
 <button type="button" id="allNotes" aria-pressed="false" aria-controls="board">Show all fretboard notes</button>
 </div>
-<div class="scroll" tabindex="0" aria-label="Scrollable guitar fretboard"><div id="board" class="board"></div></div>
+<div id="fretboard" class="scroll" tabindex="0" aria-label="Scrollable guitar fretboard"><div id="board" class="board"></div></div>
 <p class="status" id="status" role="status"></p>
 </section>
 <section class="panel" aria-labelledby="voicing">
@@ -100,7 +104,12 @@ button.tone[aria-pressed="true"] b{color:inherit}
 <button id="undo">Undo</button><button id="clear">Clear</button>
 <button id="pluck">Play notes</button><button id="strum" class="primary">Strum</button></div></div>
 <div id="notes" class="notes"></div>
-<p id="shape"></p><p id="audioStatus" role="status"></p>
+<p id="shape"></p>
+<div class="row"><p id="octaves"></p><div class="actions" aria-label="Transpose shape">
+<button type="button" id="lower">Lower 1 fret</button><button type="button" id="raise">Raise 1 fret</button>
+</div></div>
+<p id="transposeStatus" role="status">Use Left and Right to move the shape by one fret.</p>
+<p id="audioStatus" role="status"></p>
 </section>
 </main>
 <script>
@@ -130,9 +139,14 @@ const spots = tuning.flatMap((open,string) => Array.from({length:13},(_,fret) =>
 let notes = [];
 let target = null;
 let showAllNotes = false;
+let transposeWithFlats = false;
 let tones = [];
 let customFormula = '1 3 5 7';
 let audio;
+let exploring = false;
+let guidedShape = {notes:[],target:null};
+let exploreShape = [];
+const exploreHistory = [];
 
 function offset(accidentals) {
   return accidentals.startsWith('b') ? -accidentals.length : accidentals.length;
@@ -166,14 +180,107 @@ function option(value, text) {
   return new Option(text, value);
 }
 
-function syncChord() {
+function chordTones(root) {
   const custom = $('formula').value === 'Custom';
   $('custom').hidden = !custom;
-  tones = parse(custom ? customFormula : presets[$('formula').value][1], $('root').value);
-  $('bass').replaceChildren(...tones.map((tone,index) => option(index, tone.name+' · '+inversions[index])));
+  return parse(custom ? customFormula : presets[$('formula').value][1], root);
+}
+
+function setBassOptions(index) {
+  $('bass').replaceChildren(...tones.map((tone,i) => option(i, tone.name+' · '+inversions[i])));
+  $('bass').value = String(index);
+}
+
+function syncChord() {
+  const root = $('root').value;
+  transposeWithFlats = root.endsWith('b') || root === 'F';
+  tones = chordTones(root);
+  setBassOptions(0);
   notes = [];
   target = null;
   render();
+}
+
+function pitchName(name,midi) {
+  const accidental = name.slice(1).replaceAll('♭','b').replaceAll('♯','#');
+  const spelledPitch = natural[letters.indexOf(name[0])] + offset(accidental);
+  return name + ((midi - spelledPitch)/12 - 1);
+}
+
+function switchMode() {
+  exploring = $('builderMode').value === 'explore';
+  if (exploring) {
+    guidedShape = {notes,target};
+    notes = exploreShape;
+    target = null;
+  } else {
+    exploreShape = notes;
+    ({notes,target} = guidedShape);
+  }
+  $('guidedControls').hidden = exploring;
+  $('repeatControl').hidden = exploring;
+  $('allNotes').hidden = exploring;
+  $('custom').hidden = exploring || $('formula').value !== 'Custom';
+  render();
+}
+
+function exploreMatches(sorted, noteNames) {
+  const pitches = new Set(sorted.map(note => mod(note.midi)));
+  if (pitches.size < 2) return [];
+  const bass = mod(sorted[0].midi);
+  const rootPitches = [bass,...[...pitches].filter(pitch => pitch !== bass)];
+  return rootPitches.flatMap(root => Object.values(presets).flatMap(([suffix,formula]) => {
+    const name = noteNames[root];
+    const matchTones = parse(formula,name.replaceAll('♯','#').replaceAll('♭','b'));
+    if (matchTones.length !== pitches.size || !matchTones.every(tone => pitches.has(tone.pitch))) return [];
+    const bassName = matchTones.find(tone => tone.pitch === bass).name;
+    return [{name:name+suffix+(root === bass ? '' : '/'+bassName),tones:matchTones}];
+  }));
+}
+
+function editExplore(spot,picked) {
+  exploreHistory.push(notes);
+  notes = notes.filter(note => note.string !== spot.string);
+  if (!picked) notes.push(spot);
+  render();
+  $(`explore-${spot.string}-${spot.fret}`).focus({preventScroll:true});
+}
+
+function transposeShape(delta) {
+  if (!notes.length) return;
+  if (notes.some(note => note.fret + delta < 0 || note.fret + delta > 12)) {
+    $('transposeStatus').textContent = 'The whole shape must stay within frets 0–12.';
+    return;
+  }
+
+  if (exploring) {
+    exploreHistory.push(notes);
+    notes = notes.map(note => ({...note,fret:note.fret + delta,midi:note.midi + delta}));
+    const boardHadFocus = $('board').contains(document.activeElement);
+    render();
+    if (boardHadFocus) $('fretboard').focus({preventScroll:true});
+    return;
+  }
+
+  const bass = Number($('bass').value);
+  const rootNames = transposeWithFlats ? flatNames : sharpNames;
+  const root = rootNames[mod(tones[0].pitch + delta)].replaceAll('♭','b').replaceAll('♯','#');
+  const shiftedTones = chordTones(root);
+  notes = notes.map(note => ({
+    string:note.string,
+    fret:note.fret + delta,
+    midi:note.midi + delta,
+    tone:shiftedTones[tones.indexOf(note.tone)]
+  }));
+  if (target) target = shiftedTones[tones.indexOf(target)];
+  tones = shiftedTones;
+  $('root').value = root;
+  setBassOptions(bass);
+
+  const boardHadFocus = $('board').contains(document.activeElement);
+  render();
+  if (boardHadFocus) $('fretboard').focus({preventScroll:true});
+  $('transposeStatus').textContent = 'Moved to '+$('chord').textContent+' · '+$('octaves').textContent+'.';
 }
 
 function pending() {
@@ -248,18 +355,26 @@ function addSpot(spot, tone) {
 }
 
 function render(restoreFocus = false) {
-  const remaining = pending();
+  const sorted = [...notes].sort((a,b) => a.midi-b.midi);
+  const bassNote = sorted[0];
+  const remaining = exploring ? [] : pending();
   const mode = $('order').value;
   const bassUp = mode === 'bass-up';
-  const repeats = $('repeat').checked;
+  const repeats = !exploring && $('repeat').checked;
   const next = mode !== 'formula' && notes.length ? remaining : remaining.slice(0,1);
   const addingRepeats = repeats && notes.length && (bassUp || !remaining.length);
-  const canTarget = mode === 'any' && notes.length > 0;
+  const canTarget = !exploring && mode === 'any' && notes.length > 0;
   const bass = Number($('bass').value);
   const preset = presets[$('formula').value];
   const symbol = pretty($('root').value)+(preset ? preset[0] : ' custom');
-  $('chord').textContent = symbol+(bass ? '/'+tones[bass].name : '');
-  $('tones').replaceChildren(...tones.map(tone => {
+  const noteNames = ($('root').value.endsWith('b') || $('root').value === 'F' ? flatNames : sharpNames).slice();
+  const matches = exploring ? exploreMatches(sorted,noteNames) : [];
+  const match = matches[0];
+  const displayTones = exploring ? (match?.tones ?? []) : tones;
+  for (const tone of displayTones) noteNames[tone.pitch] = tone.name;
+  const nameAt = spot => noteNames[mod(spot.midi)];
+  $('chord').textContent = exploring ? (match?.name ?? 'Open explore') : symbol+(bass ? '/'+tones[bass].name : '');
+  $('tones').replaceChildren(...displayTones.map(tone => {
     const selectable = canTarget && (remaining.includes(tone) || addingRepeats);
     const chip = document.createElement(selectable ? 'button' : 'span');
     if (selectable) {
@@ -294,8 +409,6 @@ function render(restoreFocus = false) {
     !remaining.includes(tone) && sharesBarre(spot,notes)
   );
   const barres = remaining.length ? [] : barreRanges(notes);
-  const noteNames = ($('root').value.endsWith('b') || $('root').value === 'F' ? flatNames : sharpNames).slice();
-  for (const tone of tones) noteNames[tone.pitch] = tone.name;
   const board = document.createDocumentFragment();
   board.append(document.createElement('span'));
   for (let fret=0; fret<=12; fret++) {
@@ -332,13 +445,25 @@ function render(restoreFocus = false) {
       }
       const picked = notes.find(note => note.string === string && note.fret === spot.fret);
       const tone = picked?.tone ?? available.get(spot);
-      if (tone) {
+      if (exploring) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = tone.name;
+        button.id = `explore-${string}-${spot.fret}`;
+        button.className = picked ? 'free selected' : 'free';
+        if (picked && picked === bassNote) button.classList.add('bass');
+        const pitch = pitchName(nameAt(spot),spot.midi);
+        button.textContent = picked ? pitch : nameAt(spot);
+        button.setAttribute('aria-pressed',String(Boolean(picked)));
+        button.setAttribute('aria-label',pitch+', string '+(6-string)+', fret '+spot.fret);
+        button.onclick = () => editExplore(spot,picked);
+        cell.append(button);
+      } else if (tone) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = picked ? pitchName(tone.name,spot.midi) : tone.name;
         button.className = picked ? 'selected' : 'candidate';
         if (picked && picked === notes[0]) button.classList.add('bass');
-        button.setAttribute('aria-label',tone.name+($('labels').value === 'semitones' ? ', semitones from root ' : ', degree ')+interval(tone)+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret+(picked ? ', selected' : ''));
+        button.setAttribute('aria-label',pitchName(tone.name,spot.midi)+($('labels').value === 'semitones' ? ', semitones from root ' : ', degree ')+interval(tone)+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret+(picked ? ', selected' : ''));
         if (!picked && addingRepeats && !remaining.includes(tone) && sharesBarre(spot,notes)) {
           button.classList.add('barre');
           button.setAttribute('aria-label',button.getAttribute('aria-label')+', possible barre');
@@ -351,7 +476,7 @@ function render(restoreFocus = false) {
         const label = document.createElement('span');
         label.className = 'background-note';
         label.textContent = noteNames[mod(spot.midi)];
-        label.title = label.textContent+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret;
+        label.title = pitchName(label.textContent,spot.midi)+', string '+(6-string)+' ('+strings[string]+'), fret '+spot.fret;
         cell.append(label);
       }
       board.append(cell);
@@ -360,7 +485,7 @@ function render(restoreFocus = false) {
   $('board').replaceChildren(board);
   const first = remaining[0];
   let message = 'Voicing complete. Listen to it or undo your last note.';
-  if (!notes.length) message = 'Pick a bass note · '+first.name+' ('+first.degree+').';
+  if (!exploring && !notes.length) message = 'Pick a bass note · '+first.name+' ('+first.degree+').';
   else if (first && !available.size) message = 'No completion from these notes with the current settings. Undo or adjust the settings.';
   else if (first) message = 'Add '+(target ? [target] : next).map(tone => tone.name+' ('+interval(tone)+')').join(' or ')+'.';
   if (bassUp && first && notes.length && available.size) {
@@ -372,22 +497,34 @@ function render(restoreFocus = false) {
       ' Select a chord tone above to focus on it.';
   }
   if (canTarget && target && !available.size) message = 'No available positions for '+target.name+'. Select another chord tone or clear the filter.';
+  if (exploring) {
+    message = 'Pick any fret. Click the selected note again to mute that string.';
+    if (sorted.length > 1 && !match) message += ' No exact match in the chord presets.';
+    if (matches.length > 1) message += ' Also matches '+matches.slice(1).map(item => item.name).join(', ')+'.';
+  }
   if (hasBarreOption) message += ' Dashed outlines show notes that could share a barre.';
   if (barres.length) message += ' Solid lines show possible barres at '+barres.map(range =>
     'fret '+range.fret+', strings '+(6-range.low)+'–'+(6-range.high)
   ).join('; ')+'.';
   $('status').textContent = message;
-  const sorted = [...notes].sort((a,b) => a.midi-b.midi);
   $('notes').replaceChildren(...sorted.map(note => {
     const chip = document.createElement('span');
     const small = document.createElement('small');
     chip.className = 'note';
-    small.textContent = ' · '+interval(note.tone);
-    chip.append(note.tone.name+(Math.floor(note.midi/12)-1),small);
+    const tone = exploring ? displayTones.find(item => item.pitch === mod(note.midi)) : note.tone;
+    if (tone) small.textContent = ' · '+interval(tone);
+    chip.append(pitchName(nameAt(note),note.midi),small);
     return chip;
   }));
+  const rootsInShape = sorted.filter(note => mod(note.midi) === displayTones[0]?.pitch)
+    .map(note => pitchName(nameAt(note),note.midi));
+  $('octaves').textContent = sorted.length
+    ? 'Bass '+pitchName(nameAt(bassNote),bassNote.midi)+(exploring && !match ? '' : ' · Root '+(rootsInShape.join(', ') || 'still to place'))
+    : '';
+  $('transposeStatus').textContent = 'Use Left and Right to move the shape by one fret.';
   $('shape').textContent = notes.length ? 'Low E to high e   '+strings.map((_,index) => notes.find(note => note.string === index)?.fret ?? '×').join(' / ') : 'Selected notes will appear here from low to high.';
-  for (const id of ['undo','clear','pluck','strum']) $(id).disabled = !notes.length;
+  for (const id of ['undo','clear','pluck','strum','lower','raise']) $(id).disabled = !notes.length;
+  if (exploring) $('undo').disabled = !exploreHistory.length;
   if (restoreFocus) ($('board').querySelector('.candidate') ?? $('strum')).focus();
 }
 
@@ -436,8 +573,28 @@ $('span').onchange = () => {
   while (notes.length > 1 && !eligible(notes.at(-1),notes.slice(0,-1))) notes.pop();
   render();
 };
-$('undo').onclick = () => { notes.pop(); target = null; render(true); };
-$('clear').onclick = () => { notes = []; target = null; render(true); };
+$('builderMode').onchange = switchMode;
+$('undo').onclick = () => {
+  if (exploring) notes = exploreHistory.pop() ?? notes;
+  else notes.pop();
+  target = null;
+  render(!exploring);
+};
+$('clear').onclick = () => {
+  if (exploring && notes.length) exploreHistory.push(notes);
+  notes = [];
+  target = null;
+  render(!exploring);
+};
+$('lower').onclick = () => transposeShape(-1);
+$('raise').onclick = () => transposeShape(1);
+document.addEventListener('keydown',event => {
+  if (!notes.length || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
+      event.shiftKey || event.target?.closest('input, select, textarea, [contenteditable]')) return;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  transposeShape(event.key === 'ArrowLeft' ? -1 : 1);
+});
 $('pluck').onclick = () => play(false);
 $('strum').onclick = () => play(true);
 $('custom').onsubmit = event => {
